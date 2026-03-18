@@ -1,0 +1,15 @@
+{
+  "name": "Multi Paste",
+  "id": "multi-paste",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
+  "menu": [
+    { "name": "Paster", "command": "main" },
+    { "name": "Paste from Clipboard", "command": "clipboard" }
+  ]
+}
