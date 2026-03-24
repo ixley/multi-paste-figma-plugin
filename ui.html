@@ -1,231 +1,232 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Multi Paste</title>
-  <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 11px;
-      background: var(--figma-color-bg, #ffffff);
-      color: var(--figma-color-text, #333333);
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      height: 100vh;
-    }
-
-    textarea {
-      width: 100%;
-      flex: 1;
-      resize: none;
-      font-family: inherit;
-      font-size: 11px;
-      line-height: 1.5;
-      padding: 8px;
-      border: 1px solid var(--figma-color-border, #e0e0e0);
-      border-radius: 4px;
-      background: var(--figma-color-bg-secondary, #f5f5f5);
-      color: var(--figma-color-text, #333333);
-      outline: none;
-    }
-
-    textarea:focus {
-      border-color: var(--figma-color-border-selected, #18a0fb);
-    }
-
-    textarea::placeholder {
-      color: var(--figma-color-text-tertiary, #aaaaaa);
-    }
-
-    .footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .status {
-      color: var(--figma-color-text-secondary, #888888);
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    button {
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 6px 12px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      background: var(--figma-color-bg-brand, #18a0fb);
-      color: #ffffff;
-      flex-shrink: 0;
-    }
-
-    button:disabled {
-      opacity: 0.4;
-      cursor: default;
-    }
-
-    button:not(:disabled):hover {
-      background: var(--figma-color-bg-brand-hover, #0c8de0);
-    }
-
-    #main-view {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .options {
-      display: flex;
-      gap: 12px;
-    }
-
-    .options label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      cursor: pointer;
-      color: var(--figma-color-text-secondary, #888888);
-      user-select: none;
-    }
-
-    .options label:hover {
-      color: var(--figma-color-text, #333333);
-    }
-
-    .options input[type="checkbox"] {
-      margin: 0;
-      cursor: pointer;
-      accent-color: var(--figma-color-bg-brand, #18a0fb);
-    }
-
-    #clipboard-view {
-      flex: 1;
-      align-items: center;
-      justify-content: center;
-      color: var(--figma-color-text-secondary, #888888);
-    }
-  </style>
-</head>
-<body>
-  <div id="main-view">
-    <textarea
-      id="input"
-      placeholder="One value per line — each line will be applied to the next selected text node."
-      spellcheck="false"
-    ></textarea>
-    <div class="options">
-      <label><input type="checkbox" id="randomize" /> Randomize</label>
-      <label><input type="checkbox" id="repeat" /> Repeat</label>
-    </div>
-    <div class="footer">
-      <span class="status" id="status">No text nodes selected</span>
-      <button id="apply" disabled>Apply</button>
-    </div>
-  </div>
-
-  <div id="clipboard-view" style="display:none">
-    <span id="clipboard-status">Reading clipboard…</span>
-  </div>
-
-  <script>
-    const textarea = document.getElementById("input");
-    const applyBtn = document.getElementById("apply");
-    const statusEl = document.getElementById("status");
-    const randomizeCheck = document.getElementById("randomize");
-    const repeatCheck = document.getElementById("repeat");
-    const mainView = document.getElementById("main-view");
-    const clipboardView = document.getElementById("clipboard-view");
-    const clipboardStatus = document.getElementById("clipboard-status");
-
-    let selectedCount = 0;
-
-    function updateUI() {
-      const lines = textarea.value.split("\n").filter(l => l.trim() !== "");
-      const canApply = selectedCount > 0 && lines.length > 0;
-      applyBtn.disabled = !canApply;
-
-      if (selectedCount === 0) {
-        statusEl.textContent = "No text nodes selected";
-      } else if (lines.length === 0) {
-        statusEl.textContent = `${selectedCount} text node${selectedCount !== 1 ? "s" : ""} selected`;
-      } else if (repeatCheck.checked) {
-        statusEl.textContent = `Applying to all ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
-      } else {
-        const applying = Math.min(selectedCount, lines.length);
-        statusEl.textContent = `Applying ${applying} of ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-Paste</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
-    }
 
-    textarea.addEventListener("input", updateUI);
-    randomizeCheck.addEventListener("change", updateUI);
-    repeatCheck.addEventListener("change", updateUI);
+      body {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+        font-size: 11px;
+        background: var(--figma-color-bg, #ffffff);
+        color: var(--figma-color-text, #333333);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        height: 100vh;
+      }
 
-    applyBtn.addEventListener("click", () => {
-      const lines = textarea.value.split("\n").filter(l => l.trim() !== "");
-      if (lines.length === 0) return;
-      parent.postMessage({
-        pluginMessage: {
-          type: "apply",
-          lines,
-          randomize: randomizeCheck.checked,
-          repeat: repeatCheck.checked,
+      textarea {
+        width: 100%;
+        flex: 1;
+        resize: none;
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1.5;
+        padding: 8px;
+        border: 1px solid var(--figma-color-border, #e0e0e0);
+        border-radius: 4px;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        color: var(--figma-color-text, #333333);
+        outline: none;
+      }
+
+      textarea:focus {
+        border-color: var(--figma-color-border-selected, #18a0fb);
+      }
+
+      textarea::placeholder {
+        color: var(--figma-color-text-tertiary, #aaaaaa);
+      }
+
+      .footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .status {
+        color: var(--figma-color-text-secondary, #888888);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      button {
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background: var(--figma-color-bg-brand, #18a0fb);
+        color: #ffffff;
+        flex-shrink: 0;
+      }
+
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      button:not(:disabled):hover {
+        background: var(--figma-color-bg-brand-hover, #0c8de0);
+      }
+
+      #main-view {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+      }
+
+      .options {
+        display: flex;
+        gap: 12px;
+      }
+
+      .options label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        color: var(--figma-color-text-secondary, #888888);
+        user-select: none;
+      }
+
+      .options label:hover {
+        color: var(--figma-color-text, #333333);
+      }
+
+      .options input[type="checkbox"] {
+        margin: 0;
+        cursor: pointer;
+        accent-color: var(--figma-color-bg-brand, #18a0fb);
+      }
+
+      #clipboard-view {
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        color: var(--figma-color-text-secondary, #888888);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="main-view">
+      <textarea id="input" placeholder="One value per line — each line will be applied to the next selected text node." spellcheck="false"></textarea>
+      <div class="options">
+        <label><input type="checkbox" id="randomize" /> Randomize</label>
+        <label><input type="checkbox" id="repeat" /> Repeat</label>
+      </div>
+      <div class="footer">
+        <span class="status" id="status">No text nodes selected</span>
+        <button id="apply" disabled>Apply</button>
+      </div>
+    </div>
+
+    <div id="clipboard-view" style="display: none">
+      <span id="clipboard-status">Reading clipboard…</span>
+    </div>
+
+    <script>
+      const textarea = document.getElementById("input");
+      const applyBtn = document.getElementById("apply");
+      const statusEl = document.getElementById("status");
+      const randomizeCheck = document.getElementById("randomize");
+      const repeatCheck = document.getElementById("repeat");
+      const mainView = document.getElementById("main-view");
+      const clipboardView = document.getElementById("clipboard-view");
+      const clipboardStatus = document.getElementById("clipboard-status");
+
+      let selectedCount = 0;
+
+      function updateUI() {
+        const lines = textarea.value.split("\n").filter((l) => l.trim() !== "");
+        const canApply = selectedCount > 0 && lines.length > 0;
+        applyBtn.disabled = !canApply;
+
+        if (selectedCount === 0) {
+          statusEl.textContent = "No text nodes selected";
+        } else if (lines.length === 0) {
+          statusEl.textContent = `${selectedCount} text node${selectedCount !== 1 ? "s" : ""} selected`;
+        } else if (repeatCheck.checked) {
+          statusEl.textContent = `Applying to all ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
+        } else {
+          const applying = Math.min(selectedCount, lines.length);
+          statusEl.textContent = `Applying ${applying} of ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
         }
-      }, "*");
-    });
+      }
 
-    function sendClipboardLines(text) {
-      const lines = text.split("\n").filter(l => l.trim() !== "");
-      parent.postMessage({ pluginMessage: { type: "clipboard-data", lines } }, "*");
-    }
+      textarea.addEventListener("input", updateUI);
+      randomizeCheck.addEventListener("change", updateUI);
+      repeatCheck.addEventListener("change", updateUI);
 
-    async function handleClipboardRead() {
-      mainView.style.display = "none";
-      clipboardView.style.display = "flex";
-      window.focus();
+      applyBtn.addEventListener("click", () => {
+        const lines = textarea.value.split("\n").filter((l) => l.trim() !== "");
+        if (lines.length === 0) return;
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "apply",
+              lines,
+              randomize: randomizeCheck.checked,
+              repeat: repeatCheck.checked,
+            },
+          },
+          "*",
+        );
+      });
 
-      try {
-        const text = await navigator.clipboard.readText();
-        sendClipboardLines(text);
-      } catch {
-        // Clipboard API blocked — fall back to asking user to press ⌘V
+      function sendClipboardLines(text) {
+        const lines = text.split("\n").filter((l) => l.trim() !== "");
+        parent.postMessage({ pluginMessage: { type: "clipboard-data", lines } }, "*");
+      }
+
+      function handleClipboardRead() {
+        mainView.style.display = "none";
+        clipboardView.style.display = "flex";
         clipboardStatus.textContent = "Press ⌘V to apply";
-        document.addEventListener("paste", (e) => {
-          const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
-          sendClipboardLines(text);
-        }, { once: true });
+        document.addEventListener(
+          "paste",
+          (e) => {
+            const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+            sendClipboardLines(text);
+          },
+          { once: true },
+        );
       }
-    }
 
-    // Signal to the plugin that the UI is ready to receive messages
-    parent.postMessage({ pluginMessage: { type: "ready" } }, "*");
+      // Signal to the plugin that the UI is ready to receive messages
+      parent.postMessage({ pluginMessage: { type: "ready" } }, "*");
 
-    window.onmessage = async (event) => {
-      const msg = event.data.pluginMessage;
-      if (!msg) return;
+      window.onmessage = async (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
 
-      if (msg.type === "selection") {
-        selectedCount = msg.count;
-        updateUI();
-      } else if (msg.type === "clipboard-read") {
-        handleClipboardRead();
-      }
-    };
-  </script>
-</body>
+        if (msg.type === "selection") {
+          selectedCount = msg.count;
+          updateUI();
+        } else if (msg.type === "clipboard-read") {
+          handleClipboardRead();
+        }
+      };
+    </script>
+  </body>
 </html>

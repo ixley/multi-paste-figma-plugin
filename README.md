@@ -1,4 +1,4 @@
-# Multi Paste — Figma Plugin
+# Multi-Paste — Figma Plugin
 
 Paste a set of values into a series of selected text elements.
 

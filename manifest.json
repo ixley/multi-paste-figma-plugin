@@ -1,10 +1,12 @@
 {
-  "name": "Multi Paste",
+  "name": "Multi-Paste",
   "id": "multi-paste",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
   "editorType": ["figma"],
+  "id": "1618067725109819917",
+  "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": ["none"]
   },

@@ -37,10 +37,7 @@ function shuffle<T>(arr: T[]): T[] {
   return result;
 }
 
-async function applyLines(
-  lines: string[],
-  opts: { randomize: boolean; repeat: boolean }
-): Promise<void> {
+async function applyLines(lines: string[], opts: { randomize: boolean; repeat: boolean }): Promise<void> {
   const nodes = getTextNodes();
 
   if (nodes.length === 0) {
@@ -75,12 +72,12 @@ async function applyLines(
 const command = figma.command;
 
 if (command === "clipboard") {
-  // Must be visible so the iframe can get focus — required for clipboard API access
-  figma.showUI(__html__, { visible: true, width: 240, height: 56, title: "Multi Paste" });
+  // Must be visible so the paste event can fire (paste events don't reach hidden iframes)
+  figma.showUI(__html__, { visible: true, width: 240, height: 56, title: "Multi-Paste" });
   // Don't send clipboard-read yet — wait for the UI to signal it's ready
 } else {
   // "main" command — full UI
-  figma.showUI(__html__, { width: 320, height: 310, title: "Multi Paste" });
+  figma.showUI(__html__, { width: 320, height: 310, title: "Multi-Paste" });
   sendSelectionCount();
   figma.on("selectionchange", sendSelectionCount);
 }
