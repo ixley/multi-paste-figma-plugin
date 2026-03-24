@@ -8,9 +8,9 @@ function getTextNodes() {
         const by = (_d = (_c = b.absoluteBoundingBox) === null || _c === void 0 ? void 0 : _c.y) !== null && _d !== void 0 ? _d : b.y;
         const ax = (_f = (_e = a.absoluteBoundingBox) === null || _e === void 0 ? void 0 : _e.x) !== null && _f !== void 0 ? _f : a.x;
         const bx = (_h = (_g = b.absoluteBoundingBox) === null || _g === void 0 ? void 0 : _g.x) !== null && _h !== void 0 ? _h : b.x;
-        if (Math.abs(ax - bx) > 1)
-            return ax - bx;
-        return ay - by;
+        if (Math.abs(ay - by) > 1)
+            return ay - by;
+        return ax - bx;
     });
 }
 function sendSelectionCount() {

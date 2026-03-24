@@ -16,8 +16,8 @@ function getTextNodes(): TextNode[] {
       const by = b.absoluteBoundingBox?.y ?? b.y;
       const ax = a.absoluteBoundingBox?.x ?? a.x;
       const bx = b.absoluteBoundingBox?.x ?? b.x;
-      if (Math.abs(ax - bx) > 1) return ax - bx;
-      return ay - by;
+      if (Math.abs(ay - by) > 1) return ay - by;
+      return ax - bx;
     });
 }
 
