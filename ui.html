@@ -120,6 +120,128 @@
         accent-color: var(--figma-color-bg-brand, #18a0fb);
       }
 
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .mode-toggle {
+        display: inline-flex;
+        border: 1px solid var(--figma-color-border, #e0e0e0);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .mode-toggle button {
+        background: none;
+        color: var(--figma-color-text-secondary, #888888);
+        font-weight: 600;
+        padding: 5px 10px;
+        border: none;
+        border-radius: 0;
+      }
+
+      .mode-toggle button:not(:last-child) {
+        border-right: 1px solid var(--figma-color-border, #e0e0e0);
+      }
+
+      .mode-toggle button:not(.active):hover {
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        color: var(--figma-color-text, #333333);
+      }
+
+      .mode-toggle button.active {
+        background: #4d4d4d;
+        color: #ffffff;
+      }
+
+      .mode-toggle button.active:hover {
+        background: #5c5c5c;
+      }
+
+      .seq-toggle-btn {
+        background: none;
+        color: var(--figma-color-text-secondary, #888888);
+        font-weight: 600;
+        padding: 5px 10px;
+        border: 1px solid var(--figma-color-border, #e0e0e0);
+      }
+
+      .seq-toggle-btn:not(.active):hover {
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        border-color: var(--figma-color-border, #e0e0e0);
+        color: var(--figma-color-text, #333333);
+      }
+
+      .seq-toggle-btn.active {
+        background: #4d4d4d;
+        border-color: #4d4d4d;
+        color: #ffffff;
+      }
+
+      .seq-toggle-btn.active:hover {
+        background: #5c5c5c;
+        border-color: #5c5c5c;
+      }
+
+      .seq-panel {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .seq-panel input[type="number"] {
+        width: 0;
+        flex: 1;
+        font-family: inherit;
+        font-size: 11px;
+        padding: 5px 6px;
+        border: 1px solid var(--figma-color-border, #e0e0e0);
+        border-radius: 4px;
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        color: var(--figma-color-text, #333333);
+        outline: none;
+      }
+
+      .seq-panel input[type="number"]:focus {
+        border-color: var(--figma-color-border-selected, #18a0fb);
+      }
+
+      .seq-panel button {
+        padding: 5px 10px;
+      }
+
+      .history-nav {
+        display: none;
+        align-items: center;
+        gap: 4px;
+        margin-left: auto;
+        color: var(--figma-color-text-secondary, #888888);
+      }
+
+      .history-nav button {
+        background: none;
+        color: var(--figma-color-text-secondary, #888888);
+        padding: 2px 6px;
+        font-size: 11px;
+      }
+
+      .history-nav button:not(:disabled):hover {
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+        color: var(--figma-color-text, #333333);
+      }
+
+      .history-nav button:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .history-nav .history-label {
+        white-space: nowrap;
+      }
+
       #clipboard-view {
         flex: 1;
         align-items: center;
@@ -130,10 +252,30 @@
   </head>
   <body>
     <div id="main-view">
+      <div class="toolbar">
+        <div class="mode-toggle" id="mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="text">Text</button>
+          <button type="button" class="mode-btn" data-mode="rename">Layer Name</button>
+        </div>
+        <button type="button" class="seq-toggle-btn" id="seq-toggle">123...</button>
+      </div>
+
+      <div class="seq-panel" id="seq-panel" style="display: none">
+        <input type="number" id="seq-start" placeholder="Start (1)" />
+        <input type="number" id="seq-end" placeholder="End (auto)" />
+        <input type="number" id="seq-step" placeholder="Step (1)" />
+        <button type="button" id="seq-insert">Insert</button>
+      </div>
+
       <textarea id="input" placeholder="One value per line — each line will be applied to the next selected text node." spellcheck="false"></textarea>
       <div class="options">
         <label><input type="checkbox" id="randomize" /> Randomize</label>
         <label><input type="checkbox" id="repeat" /> Repeat</label>
+        <div class="history-nav" id="history-nav">
+          <button type="button" id="history-prev" title="Older (Cmd/Ctrl+↑)">‹</button>
+          <span class="history-label" id="history-label"></span>
+          <button type="button" id="history-next" title="Newer (Cmd/Ctrl+↓)">›</button>
+        </div>
       </div>
       <div class="footer">
         <span class="status" id="status">No text nodes selected</span>
@@ -154,44 +296,221 @@
       const mainView = document.getElementById("main-view");
       const clipboardView = document.getElementById("clipboard-view");
       const clipboardStatus = document.getElementById("clipboard-status");
+      const modeButtons = Array.from(document.querySelectorAll(".mode-btn"));
+      const seqToggle = document.getElementById("seq-toggle");
+      const seqPanel = document.getElementById("seq-panel");
+      const seqStart = document.getElementById("seq-start");
+      const seqEnd = document.getElementById("seq-end");
+      const seqStep = document.getElementById("seq-step");
+      const seqInsert = document.getElementById("seq-insert");
+      const historyNav = document.getElementById("history-nav");
+      const historyPrevBtn = document.getElementById("history-prev");
+      const historyNextBtn = document.getElementById("history-next");
+      const historyLabel = document.getElementById("history-label");
 
       let selectedCount = 0;
+      let currentMode = "text";
+
+      function getMode() {
+        return currentMode;
+      }
+
+      function setMode(mode) {
+        currentMode = mode;
+        modeButtons.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+      }
 
       function updateUI() {
         const lines = textarea.value.split("\n").filter((l) => l.trim() !== "");
         const canApply = selectedCount > 0 && lines.length > 0;
         applyBtn.disabled = !canApply;
 
+        const mode = getMode();
+        const noun = mode === "rename" ? "layer" : "text node";
+        applyBtn.textContent = mode === "rename" ? "Rename" : "Apply";
+
         if (selectedCount === 0) {
-          statusEl.textContent = "No text nodes selected";
+          statusEl.textContent = `No ${noun}s selected`;
         } else if (lines.length === 0) {
-          statusEl.textContent = `${selectedCount} text node${selectedCount !== 1 ? "s" : ""} selected`;
+          statusEl.textContent = `${selectedCount} ${noun}${selectedCount !== 1 ? "s" : ""} selected`;
         } else if (repeatCheck.checked) {
-          statusEl.textContent = `Applying to all ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
+          statusEl.textContent = `Applying to all ${selectedCount} ${noun}${selectedCount !== 1 ? "s" : ""}`;
         } else {
           const applying = Math.min(selectedCount, lines.length);
-          statusEl.textContent = `Applying ${applying} of ${selectedCount} node${selectedCount !== 1 ? "s" : ""}`;
+          statusEl.textContent = `Applying ${applying} of ${selectedCount} ${noun}${selectedCount !== 1 ? "s" : ""}`;
         }
       }
 
       textarea.addEventListener("input", updateUI);
       randomizeCheck.addEventListener("change", updateUI);
       repeatCheck.addEventListener("change", updateUI);
+      modeButtons.forEach((b) =>
+        b.addEventListener("click", () => {
+          if (b.dataset.mode === currentMode) return;
+          setMode(b.dataset.mode);
+          parent.postMessage({ pluginMessage: { type: "set-mode", mode: currentMode } }, "*");
+          updateUI();
+        }),
+      );
 
       applyBtn.addEventListener("click", () => {
         const lines = textarea.value.split("\n").filter((l) => l.trim() !== "");
         if (lines.length === 0) return;
+        const mode = getMode();
+        const randomize = randomizeCheck.checked;
+        const repeat = repeatCheck.checked;
+        pushHistory({ text: textarea.value, mode, randomize, repeat });
         parent.postMessage(
           {
             pluginMessage: {
               type: "apply",
               lines,
-              randomize: randomizeCheck.checked,
-              repeat: repeatCheck.checked,
+              mode,
+              randomize,
+              repeat,
             },
           },
           "*",
         );
+      });
+
+      // --- Number sequence generator ---
+
+      seqToggle.addEventListener("click", () => {
+        const showing = seqPanel.style.display !== "none";
+        seqPanel.style.display = showing ? "none" : "flex";
+        seqToggle.classList.toggle("active", !showing);
+        if (!showing) seqStart.focus();
+      });
+
+      seqInsert.addEventListener("click", () => {
+        const startRaw = seqStart.value.trim();
+        const parsedStart = parseFloat(startRaw);
+        const start = startRaw === "" || Number.isNaN(parsedStart) ? 1 : parsedStart;
+        const endRaw = seqEnd.value.trim();
+        const end = endRaw === "" ? null : parseFloat(endRaw);
+        const stepRaw = parseFloat(seqStep.value);
+        const stepMagnitude = Number.isNaN(stepRaw) || stepRaw === 0 ? 1 : Math.abs(stepRaw);
+
+        const values = [];
+        const MAX_VALUES = 5000;
+        if (end !== null && !Number.isNaN(end)) {
+          const step = end >= start ? stepMagnitude : -stepMagnitude;
+          for (let v = start; step > 0 ? v <= end : v >= end; v += step) {
+            values.push(v);
+            if (values.length >= MAX_VALUES) break;
+          }
+        } else {
+          const count = selectedCount > 0 ? selectedCount : 10;
+          for (let i = 0; i < count; i++) values.push(start + i * stepMagnitude);
+        }
+
+        textarea.value = values.join("\n");
+        seqPanel.style.display = "none";
+        seqToggle.classList.remove("active");
+        updateUI();
+      });
+
+      // --- History (persisted per-file in localStorage) ---
+
+      const HISTORY_STORAGE_KEY = "multi-paste:history";
+      const MAX_ENTRIES_PER_FILE = 20;
+      const MAX_FILES = 30;
+
+      let historyFileKey = "local";
+      let history = [];
+      let historyIndex = -1;
+
+      function loadHistoryStore() {
+        try {
+          const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+          return raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return {};
+        }
+      }
+
+      function persistHistoryForFile(fileKey, entries) {
+        try {
+          const store = loadHistoryStore();
+          store[fileKey] = { updatedAt: Date.now(), entries };
+
+          const keys = Object.keys(store);
+          if (keys.length > MAX_FILES) {
+            keys
+              .sort((a, b) => (store[a].updatedAt || 0) - (store[b].updatedAt || 0))
+              .slice(0, keys.length - MAX_FILES)
+              .forEach((k) => delete store[k]);
+          }
+
+          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(store));
+        } catch (e) {
+          // localStorage unavailable or full — history just won't persist this run
+        }
+      }
+
+      function loadHistoryForFile(fileKey) {
+        const record = loadHistoryStore()[fileKey];
+        return record && Array.isArray(record.entries) ? record.entries : [];
+      }
+
+      function pushHistory(entry) {
+        const last = history[history.length - 1];
+        if (last && last.text === entry.text) {
+          // Same content — update in place (e.g. mode toggled) rather than duplicating.
+          history[history.length - 1] = entry;
+          historyIndex = history.length - 1;
+        } else {
+          history.push(entry);
+          if (history.length > MAX_ENTRIES_PER_FILE) history.shift();
+          historyIndex = history.length - 1;
+        }
+        persistHistoryForFile(historyFileKey, history);
+        renderHistoryNav();
+      }
+
+      function renderHistoryNav() {
+        const has = history.length > 0;
+        historyNav.style.display = has ? "flex" : "none";
+        historyPrevBtn.disabled = !has || historyIndex <= 0;
+        historyNextBtn.disabled = !has || historyIndex >= history.length - 1;
+        historyLabel.textContent = has ? `${historyIndex + 1}/${history.length}` : "";
+      }
+
+      function loadHistoryEntry(index) {
+        const entry = history[index];
+        if (!entry) return;
+        textarea.value = entry.text;
+        randomizeCheck.checked = entry.randomize;
+        repeatCheck.checked = entry.repeat;
+        setMode(entry.mode);
+        parent.postMessage({ pluginMessage: { type: "set-mode", mode: entry.mode } }, "*");
+        updateUI();
+      }
+
+      historyPrevBtn.addEventListener("click", () => {
+        if (historyIndex <= 0) return;
+        historyIndex--;
+        loadHistoryEntry(historyIndex);
+        renderHistoryNav();
+      });
+
+      historyNextBtn.addEventListener("click", () => {
+        if (historyIndex >= history.length - 1) return;
+        historyIndex++;
+        loadHistoryEntry(historyIndex);
+        renderHistoryNav();
+      });
+
+      textarea.addEventListener("keydown", (e) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          historyPrevBtn.click();
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          historyNextBtn.click();
+        }
       });
 
       function sendClipboardLines(text) {
@@ -225,6 +544,11 @@
           updateUI();
         } else if (msg.type === "clipboard-read") {
           handleClipboardRead();
+        } else if (msg.type === "file-key") {
+          historyFileKey = msg.fileKey || "local";
+          history = loadHistoryForFile(historyFileKey);
+          historyIndex = history.length - 1;
+          renderHistoryNav();
         }
       };
     </script>
