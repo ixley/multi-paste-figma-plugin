@@ -76,9 +76,6 @@ async function applyLines(lines, opts) {
 function getStructuredCards() {
     return sortByPosition(figma.currentPage.selection);
 }
-function sendCardSelectionCount() {
-    figma.ui.postMessage({ type: "card-selection", count: getStructuredCards().length });
-}
 function getFieldMap(card) {
     const map = new Map();
     const addIfText = (node) => {
@@ -96,6 +93,19 @@ function getFieldMap(card) {
     }
     return map;
 }
+function getStructuredFieldNames(fieldMaps) {
+    const headerSet = new Set();
+    for (const map of fieldMaps) {
+        for (const key of map.keys())
+            headerSet.add(key);
+    }
+    return Array.from(headerSet);
+}
+function sendCardSelectionCount() {
+    const cards = getStructuredCards();
+    const fields = getStructuredFieldNames(cards.map(getFieldMap));
+    figma.ui.postMessage({ type: "card-selection", count: cards.length, fields });
+}
 function sendStructuredCopyData() {
     const cards = getStructuredCards();
     if (cards.length === 0) {
@@ -103,12 +113,7 @@ function sendStructuredCopyData() {
         return;
     }
     const fieldMaps = cards.map(getFieldMap);
-    const headerSet = new Set();
-    for (const map of fieldMaps) {
-        for (const key of map.keys())
-            headerSet.add(key);
-    }
-    const headers = Array.from(headerSet);
+    const headers = getStructuredFieldNames(fieldMaps);
     if (headers.length === 0) {
         figma.ui.postMessage({
             type: "structured-data",

@@ -304,7 +304,8 @@
       </div>
 
       <div class="seq-panel" id="field-panel" style="display: none">
-        <input type="text" id="field-name" placeholder="Target layer name (e.g. Name)" />
+        <input type="text" id="field-name" placeholder="Target layer name (e.g. Name)" list="field-options" />
+        <datalist id="field-options"></datalist>
       </div>
 
       <textarea id="structured-input" spellcheck="false"></textarea>
@@ -341,6 +342,7 @@
       const structuredModeButtons = Array.from(document.querySelectorAll("#structured-mode-toggle .mode-btn"));
       const fieldPanel = document.getElementById("field-panel");
       const fieldNameInput = document.getElementById("field-name");
+      const fieldOptions = document.getElementById("field-options");
 
       let selectedCount = 0;
       let currentMode = "text";
@@ -718,6 +720,12 @@
           handleStructuredInit();
         } else if (msg.type === "card-selection") {
           cardCount = msg.count;
+          fieldOptions.innerHTML = "";
+          for (const field of msg.fields) {
+            const option = document.createElement("option");
+            option.value = field;
+            fieldOptions.appendChild(option);
+          }
           updateStructuredUI();
         } else if (msg.type === "structured-data") {
           handleStructuredData(msg);

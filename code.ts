@@ -14,7 +14,7 @@ type StructuredCopyMsg = { type: "structured-copy" };
 type StructuredApplyMsg = { type: "structured-apply"; headers: string[]; records: StructuredRecord[] };
 type StructuredDataMsg = { type: "structured-data"; headers: string[]; records: StructuredRecord[]; error?: string };
 type StructuredInitMsg = { type: "structured-init" };
-type CardSelectionMsg = { type: "card-selection"; count: number };
+type CardSelectionMsg = { type: "card-selection"; count: number; fields: string[] };
 
 type PluginToUI = SelectionMsg | ClipboardReadMsg | FileKeyMsg | StructuredInitMsg | StructuredDataMsg | CardSelectionMsg;
 type UIToPlugin = ApplyMsg | SetModeMsg | ClipboardDataMsg | ReadyMsg | StructuredCopyMsg | StructuredApplyMsg;
@@ -106,10 +106,6 @@ function getStructuredCards(): SceneNode[] {
   return sortByPosition(figma.currentPage.selection);
 }
 
-function sendCardSelectionCount(): void {
-  figma.ui.postMessage({ type: "card-selection", count: getStructuredCards().length } satisfies PluginToUI);
-}
-
 function getFieldMap(card: SceneNode): Map<string, TextNode> {
   const map = new Map<string, TextNode>();
 
@@ -130,6 +126,20 @@ function getFieldMap(card: SceneNode): Map<string, TextNode> {
   return map;
 }
 
+function getStructuredFieldNames(fieldMaps: Map<string, TextNode>[]): string[] {
+  const headerSet = new Set<string>();
+  for (const map of fieldMaps) {
+    for (const key of map.keys()) headerSet.add(key);
+  }
+  return Array.from(headerSet);
+}
+
+function sendCardSelectionCount(): void {
+  const cards = getStructuredCards();
+  const fields = getStructuredFieldNames(cards.map(getFieldMap));
+  figma.ui.postMessage({ type: "card-selection", count: cards.length, fields } satisfies PluginToUI);
+}
+
 function sendStructuredCopyData(): void {
   const cards = getStructuredCards();
 
@@ -139,11 +149,7 @@ function sendStructuredCopyData(): void {
   }
 
   const fieldMaps = cards.map(getFieldMap);
-  const headerSet = new Set<string>();
-  for (const map of fieldMaps) {
-    for (const key of map.keys()) headerSet.add(key);
-  }
-  const headers = Array.from(headerSet);
+  const headers = getStructuredFieldNames(fieldMaps);
 
   if (headers.length === 0) {
     figma.ui.postMessage({
