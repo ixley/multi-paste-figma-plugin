@@ -32,6 +32,22 @@ function shuffle(arr) {
     }
     return result;
 }
+async function setTextCharacters(node, value) {
+    if (node.characters.length === 0) {
+        const fontName = node.fontName;
+        if (fontName !== figma.mixed) {
+            await figma.loadFontAsync(fontName);
+        }
+        else {
+            await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+        }
+    }
+    else {
+        const fonts = node.getRangeAllFontNames(0, node.characters.length);
+        await Promise.all(fonts.map((f) => figma.loadFontAsync(f)));
+    }
+    node.characters = value;
+}
 async function applyLines(lines, opts) {
     const nodes = opts.mode === "rename" ? getAllSelectedNodes() : getTextNodes();
     if (nodes.length === 0) {
@@ -45,32 +61,108 @@ async function applyLines(lines, opts) {
         const line = working[i % working.length];
         if (opts.mode === "rename") {
             node.name = line;
-            continue;
-        }
-        const textNode = node;
-        if (textNode.characters.length === 0) {
-            const fontName = textNode.fontName;
-            if (fontName !== figma.mixed) {
-                await figma.loadFontAsync(fontName);
-            }
-            else {
-                await figma.loadFontAsync({ family: "Inter", style: "Regular" });
-            }
         }
         else {
-            const fonts = textNode.getRangeAllFontNames(0, textNode.characters.length);
-            await Promise.all(fonts.map((f) => figma.loadFontAsync(f)));
+            await setTextCharacters(node, line);
         }
-        textNode.characters = line;
     }
     const verb = opts.mode === "rename" ? "Renamed" : "Applied to";
     figma.notify(`${verb} ${targets.length} node${targets.length !== 1 ? "s" : ""}.`);
+}
+// --- Structured copy/paste ---
+// Matches text layers across selected "cards" (top-level selection) by layer name,
+// instead of flattening to positional order — component instances reliably share
+// internal layer names, so that's the natural key to bind fields on.
+function getStructuredCards() {
+    return sortByPosition(figma.currentPage.selection);
+}
+function sendCardSelectionCount() {
+    figma.ui.postMessage({ type: "card-selection", count: getStructuredCards().length });
+}
+function getFieldMap(card) {
+    const map = new Map();
+    const addIfText = (node) => {
+        if (node.type === "TEXT" && node.visible && !map.has(node.name)) {
+            map.set(node.name, node);
+        }
+    };
+    addIfText(card);
+    if ("findAll" in card) {
+        const descendants = card.findAll((n) => n.type === "TEXT" && n.visible);
+        for (const node of descendants) {
+            if (!map.has(node.name))
+                map.set(node.name, node);
+        }
+    }
+    return map;
+}
+function sendStructuredCopyData() {
+    const cards = getStructuredCards();
+    if (cards.length === 0) {
+        figma.ui.postMessage({ type: "structured-data", headers: [], records: [], error: "No layers selected." });
+        return;
+    }
+    const fieldMaps = cards.map(getFieldMap);
+    const headerSet = new Set();
+    for (const map of fieldMaps) {
+        for (const key of map.keys())
+            headerSet.add(key);
+    }
+    const headers = Array.from(headerSet);
+    if (headers.length === 0) {
+        figma.ui.postMessage({
+            type: "structured-data",
+            headers: [],
+            records: [],
+            error: "No named text layers found in the selection.",
+        });
+        return;
+    }
+    const records = fieldMaps.map((map) => {
+        var _a, _b;
+        const record = {};
+        for (const header of headers) {
+            record[header] = (_b = (_a = map.get(header)) === null || _a === void 0 ? void 0 : _a.characters) !== null && _b !== void 0 ? _b : "";
+        }
+        return record;
+    });
+    figma.ui.postMessage({ type: "structured-data", headers, records });
+}
+async function applyStructured(headers, records) {
+    const cards = getStructuredCards();
+    if (cards.length === 0) {
+        figma.notify("No layers selected.", { error: true });
+        return;
+    }
+    if (records.length === 0) {
+        figma.notify("No structured data to paste.", { error: true });
+        return;
+    }
+    const targets = cards.slice(0, records.length);
+    let fieldsWritten = 0;
+    for (let i = 0; i < targets.length; i++) {
+        const fieldMap = getFieldMap(targets[i]);
+        const record = records[i];
+        for (const header of headers) {
+            const node = fieldMap.get(header);
+            const value = record[header];
+            if (node && value !== undefined) {
+                await setTextCharacters(node, value);
+                fieldsWritten++;
+            }
+        }
+    }
+    figma.notify(`Applied ${fieldsWritten} field${fieldsWritten !== 1 ? "s" : ""} across ${targets.length} layer${targets.length !== 1 ? "s" : ""}.`);
 }
 const command = figma.command;
 if (command === "clipboard") {
     // Must be visible so the paste event can fire (paste events don't reach hidden iframes)
     figma.showUI(__html__, { visible: true, width: 240, height: 56, title: "Multi-Paste" });
     // Don't send clipboard-read yet — wait for the UI to signal it's ready
+}
+else if (command === "structured") {
+    figma.showUI(__html__, { width: 360, height: 420, title: "Multi-Paste — Structured" });
+    figma.on("selectionchange", sendCardSelectionCount);
 }
 else {
     // "main" command — full UI
@@ -79,14 +171,20 @@ else {
 }
 figma.ui.onmessage = async (msg) => {
     var _a;
-    if (msg.type === "ready" && command === "clipboard") {
-        // UI is loaded — now it's safe to request clipboard data
-        figma.ui.postMessage({ type: "clipboard-read" });
-    }
-    else if (msg.type === "ready") {
-        // UI is loaded — safe to send the file key (for per-file history) and the initial selection count
-        figma.ui.postMessage({ type: "file-key", fileKey: (_a = figma.fileKey) !== null && _a !== void 0 ? _a : null });
-        sendSelectionCount();
+    if (msg.type === "ready") {
+        if (command === "clipboard") {
+            // UI is loaded — now it's safe to request clipboard data
+            figma.ui.postMessage({ type: "clipboard-read" });
+        }
+        else if (command === "structured") {
+            figma.ui.postMessage({ type: "structured-init" });
+            sendCardSelectionCount();
+        }
+        else {
+            // UI is loaded — safe to send the file key (for per-file history) and the initial selection count
+            figma.ui.postMessage({ type: "file-key", fileKey: (_a = figma.fileKey) !== null && _a !== void 0 ? _a : null });
+            sendSelectionCount();
+        }
     }
     else if (msg.type === "set-mode") {
         currentMode = msg.mode;
@@ -94,6 +192,12 @@ figma.ui.onmessage = async (msg) => {
     }
     else if (msg.type === "apply") {
         await applyLines(msg.lines, { mode: msg.mode, randomize: msg.randomize, repeat: msg.repeat });
+    }
+    else if (msg.type === "structured-copy") {
+        sendStructuredCopyData();
+    }
+    else if (msg.type === "structured-apply") {
+        await applyStructured(msg.headers, msg.records);
     }
     else if (msg.type === "clipboard-data") {
         if (msg.error) {

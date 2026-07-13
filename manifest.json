@@ -12,6 +12,7 @@
   },
   "menu": [
     { "name": "Paster", "command": "main" },
-    { "name": "Paste from Clipboard", "command": "clipboard" }
+    { "name": "Paste from Clipboard", "command": "clipboard" },
+    { "name": "Structured Copy/Paste", "command": "structured" }
   ]
 }

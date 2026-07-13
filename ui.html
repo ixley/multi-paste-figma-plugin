@@ -248,6 +248,13 @@
         justify-content: center;
         color: var(--figma-color-text-secondary, #888888);
       }
+
+      #structured-view {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+      }
     </style>
   </head>
   <body>
@@ -287,6 +294,24 @@
       <span id="clipboard-status">Reading clipboard…</span>
     </div>
 
+    <div id="structured-view" style="display: none">
+      <div class="toolbar">
+        <div class="mode-toggle" id="structured-mode-toggle">
+          <button type="button" class="mode-btn active" data-smode="copy">Copy</button>
+          <button type="button" class="mode-btn" data-smode="paste">Paste</button>
+        </div>
+      </div>
+      <textarea
+        id="structured-input"
+        placeholder="Tab-separated values — header row = layer names. Copy from selected layers, or paste your own to apply."
+        spellcheck="false"
+      ></textarea>
+      <div class="footer">
+        <span class="status" id="structured-status">No layers selected</span>
+        <button id="structured-action" disabled>Copy</button>
+      </div>
+    </div>
+
     <script>
       const textarea = document.getElementById("input");
       const applyBtn = document.getElementById("apply");
@@ -296,7 +321,7 @@
       const mainView = document.getElementById("main-view");
       const clipboardView = document.getElementById("clipboard-view");
       const clipboardStatus = document.getElementById("clipboard-status");
-      const modeButtons = Array.from(document.querySelectorAll(".mode-btn"));
+      const modeButtons = Array.from(document.querySelectorAll("#mode-toggle .mode-btn"));
       const seqToggle = document.getElementById("seq-toggle");
       const seqPanel = document.getElementById("seq-panel");
       const seqStart = document.getElementById("seq-start");
@@ -307,6 +332,11 @@
       const historyPrevBtn = document.getElementById("history-prev");
       const historyNextBtn = document.getElementById("history-next");
       const historyLabel = document.getElementById("history-label");
+      const structuredView = document.getElementById("structured-view");
+      const structuredTextarea = document.getElementById("structured-input");
+      const structuredStatus = document.getElementById("structured-status");
+      const structuredActionBtn = document.getElementById("structured-action");
+      const structuredModeButtons = Array.from(document.querySelectorAll("#structured-mode-toggle .mode-btn"));
 
       let selectedCount = 0;
       let currentMode = "text";
@@ -513,6 +543,104 @@
         }
       });
 
+      // --- Structured copy/paste ---
+      // TSV in/out: header row = layer names, one row per selected "card". Round-trips
+      // through Excel/Sheets for bulk editing outside Figma.
+
+      let structuredMode = "copy"; // "copy" | "paste"
+      let cardCount = 0;
+
+      function toTSV(headers, records) {
+        const escapeCell = (v) => String(v ?? "").replace(/\t/g, " ").replace(/\r?\n/g, "\\n");
+        const lines = [headers.map(escapeCell).join("\t")];
+        for (const record of records) {
+          lines.push(headers.map((h) => escapeCell(record[h])).join("\t"));
+        }
+        return lines.join("\n");
+      }
+
+      function parseTSV(text) {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+        if (lines.length === 0) return { headers: [], records: [] };
+        const headers = lines[0].split("\t").map((h) => h.trim());
+        const records = lines.slice(1).map((line) => {
+          const cells = line.split("\t");
+          const record = {};
+          headers.forEach((h, i) => {
+            record[h] = (cells[i] ?? "").replace(/\\n/g, "\n");
+          });
+          return record;
+        });
+        return { headers, records };
+      }
+
+      function setStructuredMode(mode) {
+        structuredMode = mode;
+        structuredModeButtons.forEach((b) => b.classList.toggle("active", b.dataset.smode === mode));
+        updateStructuredUI();
+      }
+
+      function updateStructuredUI() {
+        const noSelection = cardCount === 0;
+        structuredStatus.textContent = noSelection ? "No layers selected" : `${cardCount} layer${cardCount !== 1 ? "s" : ""} selected`;
+
+        if (structuredMode === "copy") {
+          structuredActionBtn.textContent = "Copy";
+          structuredActionBtn.disabled = noSelection;
+        } else {
+          const rows = structuredTextarea.value.split(/\r?\n/).filter((l) => l.trim() !== "");
+          structuredActionBtn.textContent = "Paste";
+          structuredActionBtn.disabled = noSelection || rows.length < 2;
+        }
+      }
+
+      structuredModeButtons.forEach((b) =>
+        b.addEventListener("click", () => {
+          if (b.dataset.smode === structuredMode) return;
+          setStructuredMode(b.dataset.smode);
+        }),
+      );
+
+      structuredTextarea.addEventListener("input", () => {
+        if (structuredMode === "paste") updateStructuredUI();
+      });
+
+      structuredActionBtn.addEventListener("click", () => {
+        if (structuredMode === "copy") {
+          parent.postMessage({ pluginMessage: { type: "structured-copy" } }, "*");
+        } else {
+          const { headers, records } = parseTSV(structuredTextarea.value);
+          if (headers.length === 0 || records.length === 0) return;
+          parent.postMessage({ pluginMessage: { type: "structured-apply", headers, records } }, "*");
+        }
+      });
+
+      function handleStructuredData(msg) {
+        if (msg.error) {
+          structuredTextarea.value = "";
+          structuredStatus.textContent = msg.error;
+          return;
+        }
+        structuredTextarea.value = toTSV(msg.headers, msg.records);
+        structuredTextarea.focus();
+        structuredTextarea.select();
+        let copied = false;
+        try {
+          copied = document.execCommand("copy");
+        } catch (e) {
+          copied = false;
+        }
+        const summary = `${msg.headers.length} field${msg.headers.length !== 1 ? "s" : ""} × ${msg.records.length} layer${msg.records.length !== 1 ? "s" : ""}`;
+        structuredStatus.textContent = copied ? `Copied ${summary}.` : `Ready to copy (${summary}) — press ⌘C.`;
+      }
+
+      function handleStructuredInit() {
+        mainView.style.display = "none";
+        clipboardView.style.display = "none";
+        structuredView.style.display = "flex";
+        setStructuredMode("copy");
+      }
+
       function sendClipboardLines(text) {
         const lines = text.split("\n").filter((l) => l.trim() !== "");
         parent.postMessage({ pluginMessage: { type: "clipboard-data", lines } }, "*");
@@ -549,6 +677,13 @@
           history = loadHistoryForFile(historyFileKey);
           historyIndex = history.length - 1;
           renderHistoryNav();
+        } else if (msg.type === "structured-init") {
+          handleStructuredInit();
+        } else if (msg.type === "card-selection") {
+          cardCount = msg.count;
+          updateStructuredUI();
+        } else if (msg.type === "structured-data") {
+          handleStructuredData(msg);
         }
       };
     </script>
