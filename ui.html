@@ -192,7 +192,7 @@
         align-items: center;
       }
 
-      .seq-panel input[type="number"] {
+      .seq-panel input {
         width: 0;
         flex: 1;
         font-family: inherit;
@@ -205,7 +205,7 @@
         outline: none;
       }
 
-      .seq-panel input[type="number"]:focus {
+      .seq-panel input:focus {
         border-color: var(--figma-color-border-selected, #18a0fb);
       }
 
@@ -299,13 +299,15 @@
         <div class="mode-toggle" id="structured-mode-toggle">
           <button type="button" class="mode-btn active" data-smode="copy">Copy</button>
           <button type="button" class="mode-btn" data-smode="paste">Paste</button>
+          <button type="button" class="mode-btn" data-smode="field">Field</button>
         </div>
       </div>
-      <textarea
-        id="structured-input"
-        placeholder="Tab-separated values — header row = layer names. Copy from selected layers, or paste your own to apply."
-        spellcheck="false"
-      ></textarea>
+
+      <div class="seq-panel" id="field-panel" style="display: none">
+        <input type="text" id="field-name" placeholder="Target layer name (e.g. Name)" />
+      </div>
+
+      <textarea id="structured-input" spellcheck="false"></textarea>
       <div class="footer">
         <span class="status" id="structured-status">No layers selected</span>
         <button id="structured-action" disabled>Copy</button>
@@ -337,6 +339,8 @@
       const structuredStatus = document.getElementById("structured-status");
       const structuredActionBtn = document.getElementById("structured-action");
       const structuredModeButtons = Array.from(document.querySelectorAll("#structured-mode-toggle .mode-btn"));
+      const fieldPanel = document.getElementById("field-panel");
+      const fieldNameInput = document.getElementById("field-name");
 
       let selectedCount = 0;
       let currentMode = "text";
@@ -544,39 +548,57 @@
       });
 
       // --- Structured copy/paste ---
-      // TSV in/out: header row = layer names, one row per selected "card". Round-trips
-      // through Excel/Sheets for bulk editing outside Figma.
+      // "Field: value" blocks, one block per selected "card", blank line between cards —
+      // reads as labeled data (name visible per value) instead of a raw delimited table.
+      // A third "Field" mode targets one named layer at a time with a plain one-value-per-line
+      // list, for source data that arrives as separate clean lists (names, then roles, then
+      // locations) rather than already joined into full rows.
 
-      let structuredMode = "copy"; // "copy" | "paste"
+      let structuredMode = "copy"; // "copy" | "paste" | "field"
       let cardCount = 0;
 
-      function toTSV(headers, records) {
-        const escapeCell = (v) => String(v ?? "").replace(/\t/g, " ").replace(/\r?\n/g, "\\n");
-        const lines = [headers.map(escapeCell).join("\t")];
-        for (const record of records) {
-          lines.push(headers.map((h) => escapeCell(record[h])).join("\t"));
-        }
-        return lines.join("\n");
+      function toLabeledText(headers, records) {
+        const escapeValue = (v) => String(v ?? "").replace(/\r?\n/g, "\\n");
+        return records.map((record) => headers.map((h) => `${h}: ${escapeValue(record[h])}`).join("\n")).join("\n\n");
       }
 
-      function parseTSV(text) {
-        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-        if (lines.length === 0) return { headers: [], records: [] };
-        const headers = lines[0].split("\t").map((h) => h.trim());
-        const records = lines.slice(1).map((line) => {
-          const cells = line.split("\t");
+      function parseLabeledText(text) {
+        const blocks = text
+          .replace(/\r\n/g, "\n")
+          .split(/\n\s*\n/)
+          .map((b) => b.trim())
+          .filter((b) => b !== "");
+
+        const headers = [];
+        const records = blocks.map((block) => {
           const record = {};
-          headers.forEach((h, i) => {
-            record[h] = (cells[i] ?? "").replace(/\\n/g, "\n");
-          });
+          for (const line of block.split("\n")) {
+            const sep = line.indexOf(":");
+            if (sep === -1) continue;
+            const key = line.slice(0, sep).trim();
+            const value = line
+              .slice(sep + 1)
+              .trim()
+              .replace(/\\n/g, "\n");
+            if (!headers.includes(key)) headers.push(key);
+            record[key] = value;
+          }
           return record;
         });
+
         return { headers, records };
       }
 
       function setStructuredMode(mode) {
         structuredMode = mode;
         structuredModeButtons.forEach((b) => b.classList.toggle("active", b.dataset.smode === mode));
+        fieldPanel.style.display = mode === "field" ? "flex" : "none";
+        structuredTextarea.placeholder =
+          mode === "copy"
+            ? "Click Copy to read values from the selected layers."
+            : mode === "paste"
+              ? "Field: value — blank line between cards. Paste structured data to apply it."
+              : "One value per line — applied to the target layer above, across cards in order.";
         updateStructuredUI();
       }
 
@@ -587,10 +609,17 @@
         if (structuredMode === "copy") {
           structuredActionBtn.textContent = "Copy";
           structuredActionBtn.disabled = noSelection;
-        } else {
-          const rows = structuredTextarea.value.split(/\r?\n/).filter((l) => l.trim() !== "");
+        } else if (structuredMode === "paste") {
+          const blocks = structuredTextarea.value
+            .split(/\n\s*\n/)
+            .map((b) => b.trim())
+            .filter((b) => b !== "");
           structuredActionBtn.textContent = "Paste";
-          structuredActionBtn.disabled = noSelection || rows.length < 2;
+          structuredActionBtn.disabled = noSelection || blocks.length === 0;
+        } else {
+          const lines = structuredTextarea.value.split("\n").filter((l) => l.trim() !== "");
+          structuredActionBtn.textContent = "Apply to Field";
+          structuredActionBtn.disabled = noSelection || fieldNameInput.value.trim() === "" || lines.length === 0;
         }
       }
 
@@ -602,16 +631,24 @@
       );
 
       structuredTextarea.addEventListener("input", () => {
-        if (structuredMode === "paste") updateStructuredUI();
+        if (structuredMode !== "copy") updateStructuredUI();
       });
+
+      fieldNameInput.addEventListener("input", updateStructuredUI);
 
       structuredActionBtn.addEventListener("click", () => {
         if (structuredMode === "copy") {
           parent.postMessage({ pluginMessage: { type: "structured-copy" } }, "*");
-        } else {
-          const { headers, records } = parseTSV(structuredTextarea.value);
+        } else if (structuredMode === "paste") {
+          const { headers, records } = parseLabeledText(structuredTextarea.value);
           if (headers.length === 0 || records.length === 0) return;
           parent.postMessage({ pluginMessage: { type: "structured-apply", headers, records } }, "*");
+        } else {
+          const fieldName = fieldNameInput.value.trim();
+          const lines = structuredTextarea.value.split("\n").filter((l) => l.trim() !== "");
+          if (!fieldName || lines.length === 0) return;
+          const records = lines.map((line) => ({ [fieldName]: line }));
+          parent.postMessage({ pluginMessage: { type: "structured-apply", headers: [fieldName], records } }, "*");
         }
       });
 
@@ -621,7 +658,7 @@
           structuredStatus.textContent = msg.error;
           return;
         }
-        structuredTextarea.value = toTSV(msg.headers, msg.records);
+        structuredTextarea.value = toLabeledText(msg.headers, msg.records);
         structuredTextarea.focus();
         structuredTextarea.select();
         let copied = false;
