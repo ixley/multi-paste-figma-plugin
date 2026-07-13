@@ -16,8 +16,32 @@ type StructuredDataMsg = { type: "structured-data"; headers: string[]; records: 
 type StructuredInitMsg = { type: "structured-init" };
 type CardSelectionMsg = { type: "card-selection"; count: number; fields: string[] };
 
-type PluginToUI = SelectionMsg | ClipboardReadMsg | FileKeyMsg | StructuredInitMsg | StructuredDataMsg | CardSelectionMsg;
-type UIToPlugin = ApplyMsg | SetModeMsg | ClipboardDataMsg | ReadyMsg | StructuredCopyMsg | StructuredApplyMsg;
+// History persistence — proxied through figma.clientStorage (the only storage that
+// actually survives a plugin relaunch; the UI iframe's own localStorage does not,
+// since Figma re-injects the UI's HTML fresh each run rather than navigating a stable
+// origin).
+type HistoryStoreName = "simple" | "structured";
+type HistoryLoadMsg = { type: "history-load"; store: HistoryStoreName; fileKey: string };
+type HistorySaveMsg = { type: "history-save"; store: HistoryStoreName; fileKey: string; entries: unknown[] };
+type HistoryDataMsg = { type: "history-data"; store: HistoryStoreName; entries: unknown[] };
+
+type PluginToUI =
+  | SelectionMsg
+  | ClipboardReadMsg
+  | FileKeyMsg
+  | StructuredInitMsg
+  | StructuredDataMsg
+  | CardSelectionMsg
+  | HistoryDataMsg;
+type UIToPlugin =
+  | ApplyMsg
+  | SetModeMsg
+  | ClipboardDataMsg
+  | ReadyMsg
+  | StructuredCopyMsg
+  | StructuredApplyMsg
+  | HistoryLoadMsg
+  | HistorySaveMsg;
 
 function sortByPosition<T extends SceneNode>(nodes: readonly T[]): T[] {
   return nodes.slice().sort((a, b) => {
@@ -203,6 +227,43 @@ async function applyStructured(headers: string[], records: StructuredRecord[]): 
   figma.notify(`Applied ${fieldsWritten} field${fieldsWritten !== 1 ? "s" : ""} across ${targets.length} layer${targets.length !== 1 ? "s" : ""}.`);
 }
 
+// --- History persistence (figma.clientStorage) ---
+
+type HistoryRecord = { updatedAt: number; entries: unknown[] };
+
+const MAX_HISTORY_FILES = 30; // per store, across all files — bounds clientStorage growth
+
+function historyStorageKey(store: HistoryStoreName, fileKey: string): string {
+  return `history:${store}:${fileKey}`;
+}
+
+async function loadHistoryEntries(store: HistoryStoreName, fileKey: string): Promise<unknown[]> {
+  const record = (await figma.clientStorage.getAsync(historyStorageKey(store, fileKey))) as HistoryRecord | undefined;
+  return record && Array.isArray(record.entries) ? record.entries : [];
+}
+
+async function pruneHistoryStore(store: HistoryStoreName): Promise<void> {
+  const prefix = `history:${store}:`;
+  const keys = (await figma.clientStorage.keysAsync()).filter((k) => k.startsWith(prefix));
+  if (keys.length <= MAX_HISTORY_FILES) return;
+
+  const withTimestamps = await Promise.all(
+    keys.map(async (key) => {
+      const record = (await figma.clientStorage.getAsync(key)) as HistoryRecord | undefined;
+      return { key, updatedAt: record?.updatedAt ?? 0 };
+    }),
+  );
+  withTimestamps.sort((a, b) => a.updatedAt - b.updatedAt);
+  const toEvict = withTimestamps.slice(0, withTimestamps.length - MAX_HISTORY_FILES);
+  await Promise.all(toEvict.map((r) => figma.clientStorage.deleteAsync(r.key)));
+}
+
+async function saveHistoryEntries(store: HistoryStoreName, fileKey: string, entries: unknown[]): Promise<void> {
+  const record: HistoryRecord = { updatedAt: Date.now(), entries };
+  await figma.clientStorage.setAsync(historyStorageKey(store, fileKey), record);
+  await pruneHistoryStore(store);
+}
+
 const command = figma.command;
 
 if (command === "clipboard") {
@@ -225,6 +286,7 @@ figma.ui.onmessage = async (msg: UIToPlugin) => {
       figma.ui.postMessage({ type: "clipboard-read" } satisfies PluginToUI);
     } else if (command === "structured") {
       figma.ui.postMessage({ type: "structured-init" } satisfies PluginToUI);
+      figma.ui.postMessage({ type: "file-key", fileKey: figma.fileKey ?? null } satisfies PluginToUI);
       sendCardSelectionCount();
     } else {
       // UI is loaded — safe to send the file key (for per-file history) and the initial selection count
@@ -240,6 +302,11 @@ figma.ui.onmessage = async (msg: UIToPlugin) => {
     sendStructuredCopyData();
   } else if (msg.type === "structured-apply") {
     await applyStructured(msg.headers, msg.records);
+  } else if (msg.type === "history-load") {
+    const entries = await loadHistoryEntries(msg.store, msg.fileKey);
+    figma.ui.postMessage({ type: "history-data", store: msg.store, entries } satisfies PluginToUI);
+  } else if (msg.type === "history-save") {
+    await saveHistoryEntries(msg.store, msg.fileKey, msg.entries);
   } else if (msg.type === "clipboard-data") {
     if (msg.error) {
       figma.closePlugin(`Clipboard error: ${msg.error}`);

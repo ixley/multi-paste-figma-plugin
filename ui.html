@@ -309,6 +309,13 @@
       </div>
 
       <textarea id="structured-input" spellcheck="false"></textarea>
+      <div class="options">
+        <div class="history-nav" id="structured-history-nav">
+          <button type="button" id="structured-history-prev" title="Older (Cmd/Ctrl+↑)">‹</button>
+          <span class="history-label" id="structured-history-label"></span>
+          <button type="button" id="structured-history-next" title="Newer (Cmd/Ctrl+↓)">›</button>
+        </div>
+      </div>
       <div class="footer">
         <span class="status" id="structured-status">No layers selected</span>
         <button id="structured-action" disabled>Copy</button>
@@ -343,6 +350,10 @@
       const fieldPanel = document.getElementById("field-panel");
       const fieldNameInput = document.getElementById("field-name");
       const fieldOptions = document.getElementById("field-options");
+      const structuredHistoryNav = document.getElementById("structured-history-nav");
+      const structuredHistoryPrevBtn = document.getElementById("structured-history-prev");
+      const structuredHistoryNextBtn = document.getElementById("structured-history-next");
+      const structuredHistoryLabel = document.getElementById("structured-history-label");
 
       let selectedCount = 0;
       let currentMode = "text";
@@ -395,7 +406,7 @@
         const mode = getMode();
         const randomize = randomizeCheck.checked;
         const repeat = repeatCheck.checked;
-        pushHistory({ text: textarea.value, mode, randomize, repeat });
+        simpleHistory.push({ text: textarea.value, mode, randomize, repeat });
         parent.postMessage(
           {
             pluginMessage: {
@@ -447,107 +458,101 @@
         updateUI();
       });
 
-      // --- History (persisted per-file in localStorage) ---
+      // --- History (persisted via figma.clientStorage, proxied through the backend —
+      // the UI iframe's own localStorage does NOT survive a plugin relaunch, since Figma
+      // re-injects the UI fresh each run rather than navigating a stable origin) ---
 
-      const HISTORY_STORAGE_KEY = "multi-paste:history";
       const MAX_ENTRIES_PER_FILE = 20;
-      const MAX_FILES = 30;
 
-      let historyFileKey = "local";
-      let history = [];
-      let historyIndex = -1;
+      function createHistoryController({ store, navEl, prevBtn, nextBtn, labelEl, restore }) {
+        let fileKey = "local";
+        let entries = [];
+        let index = -1;
 
-      function loadHistoryStore() {
-        try {
-          const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-          return raw ? JSON.parse(raw) : {};
-        } catch (e) {
-          return {};
+        function render() {
+          const has = entries.length > 0;
+          navEl.style.display = has ? "flex" : "none";
+          prevBtn.disabled = !has || index <= 0;
+          nextBtn.disabled = !has || index >= entries.length - 1;
+          labelEl.textContent = has ? `${index + 1}/${entries.length}` : "";
         }
-      }
 
-      function persistHistoryForFile(fileKey, entries) {
-        try {
-          const store = loadHistoryStore();
-          store[fileKey] = { updatedAt: Date.now(), entries };
-
-          const keys = Object.keys(store);
-          if (keys.length > MAX_FILES) {
-            keys
-              .sort((a, b) => (store[a].updatedAt || 0) - (store[b].updatedAt || 0))
-              .slice(0, keys.length - MAX_FILES)
-              .forEach((k) => delete store[k]);
-          }
-
-          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(store));
-        } catch (e) {
-          // localStorage unavailable or full — history just won't persist this run
+        function persist() {
+          parent.postMessage({ pluginMessage: { type: "history-save", store, fileKey, entries } }, "*");
         }
-      }
 
-      function loadHistoryForFile(fileKey) {
-        const record = loadHistoryStore()[fileKey];
-        return record && Array.isArray(record.entries) ? record.entries : [];
-      }
-
-      function pushHistory(entry) {
-        const last = history[history.length - 1];
-        if (last && last.text === entry.text) {
-          // Same content — update in place (e.g. mode toggled) rather than duplicating.
-          history[history.length - 1] = entry;
-          historyIndex = history.length - 1;
-        } else {
-          history.push(entry);
-          if (history.length > MAX_ENTRIES_PER_FILE) history.shift();
-          historyIndex = history.length - 1;
+        function goTo(i) {
+          const entry = entries[i];
+          if (!entry) return;
+          index = i;
+          restore(entry);
+          render();
         }
-        persistHistoryForFile(historyFileKey, history);
-        renderHistoryNav();
+
+        prevBtn.addEventListener("click", () => {
+          if (index > 0) goTo(index - 1);
+        });
+        nextBtn.addEventListener("click", () => {
+          if (index < entries.length - 1) goTo(index + 1);
+        });
+
+        return {
+          setFileKey(key) {
+            fileKey = key || "local";
+          },
+          requestLoad() {
+            parent.postMessage({ pluginMessage: { type: "history-load", store, fileKey } }, "*");
+          },
+          receiveEntries(loaded) {
+            entries = Array.isArray(loaded) ? loaded : [];
+            index = entries.length - 1;
+            render();
+          },
+          push(entry) {
+            const last = entries[entries.length - 1];
+            if (last && last.text === entry.text) {
+              // Same content — update in place (e.g. mode toggled) rather than duplicating.
+              entries[entries.length - 1] = entry;
+              index = entries.length - 1;
+            } else {
+              entries.push(entry);
+              if (entries.length > MAX_ENTRIES_PER_FILE) entries.shift();
+              index = entries.length - 1;
+            }
+            persist();
+            render();
+          },
+          bindKeyboard(el) {
+            el.addEventListener("keydown", (e) => {
+              if (!(e.metaKey || e.ctrlKey)) return;
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                prevBtn.click();
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                nextBtn.click();
+              }
+            });
+          },
+        };
       }
 
-      function renderHistoryNav() {
-        const has = history.length > 0;
-        historyNav.style.display = has ? "flex" : "none";
-        historyPrevBtn.disabled = !has || historyIndex <= 0;
-        historyNextBtn.disabled = !has || historyIndex >= history.length - 1;
-        historyLabel.textContent = has ? `${historyIndex + 1}/${history.length}` : "";
-      }
-
-      function loadHistoryEntry(index) {
-        const entry = history[index];
-        if (!entry) return;
-        textarea.value = entry.text;
-        randomizeCheck.checked = entry.randomize;
-        repeatCheck.checked = entry.repeat;
-        setMode(entry.mode);
-        parent.postMessage({ pluginMessage: { type: "set-mode", mode: entry.mode } }, "*");
-        updateUI();
-      }
-
-      historyPrevBtn.addEventListener("click", () => {
-        if (historyIndex <= 0) return;
-        historyIndex--;
-        loadHistoryEntry(historyIndex);
-        renderHistoryNav();
+      const simpleHistory = createHistoryController({
+        store: "simple",
+        navEl: historyNav,
+        prevBtn: historyPrevBtn,
+        nextBtn: historyNextBtn,
+        labelEl: historyLabel,
+        restore(entry) {
+          textarea.value = entry.text;
+          randomizeCheck.checked = entry.randomize;
+          repeatCheck.checked = entry.repeat;
+          setMode(entry.mode);
+          parent.postMessage({ pluginMessage: { type: "set-mode", mode: entry.mode } }, "*");
+          updateUI();
+        },
       });
-
-      historyNextBtn.addEventListener("click", () => {
-        if (historyIndex >= history.length - 1) return;
-        historyIndex++;
-        loadHistoryEntry(historyIndex);
-        renderHistoryNav();
-      });
-
-      textarea.addEventListener("keydown", (e) => {
-        if (!(e.metaKey || e.ctrlKey)) return;
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          historyPrevBtn.click();
-        } else if (e.key === "ArrowDown") {
-          e.preventDefault();
-          historyNextBtn.click();
-        }
-      });
+      simpleHistory.bindKeyboard(textarea);
 
       // --- Structured copy/paste ---
       // "Field: value" blocks, one block per selected "card", blank line between cards —
@@ -638,18 +643,35 @@
 
       fieldNameInput.addEventListener("input", updateStructuredUI);
 
+      const structuredHistory = createHistoryController({
+        store: "structured",
+        navEl: structuredHistoryNav,
+        prevBtn: structuredHistoryPrevBtn,
+        nextBtn: structuredHistoryNextBtn,
+        labelEl: structuredHistoryLabel,
+        restore(entry) {
+          setStructuredMode(entry.smode);
+          structuredTextarea.value = entry.text;
+          if (entry.smode === "field") fieldNameInput.value = entry.fieldName || "";
+          updateStructuredUI();
+        },
+      });
+      structuredHistory.bindKeyboard(structuredTextarea);
+
       structuredActionBtn.addEventListener("click", () => {
         if (structuredMode === "copy") {
           parent.postMessage({ pluginMessage: { type: "structured-copy" } }, "*");
         } else if (structuredMode === "paste") {
           const { headers, records } = parseLabeledText(structuredTextarea.value);
           if (headers.length === 0 || records.length === 0) return;
+          structuredHistory.push({ smode: "paste", text: structuredTextarea.value, fieldName: "" });
           parent.postMessage({ pluginMessage: { type: "structured-apply", headers, records } }, "*");
         } else {
           const fieldName = fieldNameInput.value.trim();
           const lines = structuredTextarea.value.split("\n").filter((l) => l.trim() !== "");
           if (!fieldName || lines.length === 0) return;
           const records = lines.map((line) => ({ [fieldName]: line }));
+          structuredHistory.push({ smode: "field", text: structuredTextarea.value, fieldName });
           parent.postMessage({ pluginMessage: { type: "structured-apply", headers: [fieldName], records } }, "*");
         }
       });
@@ -712,10 +734,13 @@
         } else if (msg.type === "clipboard-read") {
           handleClipboardRead();
         } else if (msg.type === "file-key") {
-          historyFileKey = msg.fileKey || "local";
-          history = loadHistoryForFile(historyFileKey);
-          historyIndex = history.length - 1;
-          renderHistoryNav();
+          simpleHistory.setFileKey(msg.fileKey);
+          simpleHistory.requestLoad();
+          structuredHistory.setFileKey(msg.fileKey);
+          structuredHistory.requestLoad();
+        } else if (msg.type === "history-data") {
+          if (msg.store === "simple") simpleHistory.receiveEntries(msg.entries);
+          else if (msg.store === "structured") structuredHistory.receiveEntries(msg.entries);
         } else if (msg.type === "structured-init") {
           handleStructuredInit();
         } else if (msg.type === "card-selection") {

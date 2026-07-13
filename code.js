@@ -159,6 +159,33 @@ async function applyStructured(headers, records) {
     }
     figma.notify(`Applied ${fieldsWritten} field${fieldsWritten !== 1 ? "s" : ""} across ${targets.length} layer${targets.length !== 1 ? "s" : ""}.`);
 }
+const MAX_HISTORY_FILES = 30; // per store, across all files — bounds clientStorage growth
+function historyStorageKey(store, fileKey) {
+    return `history:${store}:${fileKey}`;
+}
+async function loadHistoryEntries(store, fileKey) {
+    const record = (await figma.clientStorage.getAsync(historyStorageKey(store, fileKey)));
+    return record && Array.isArray(record.entries) ? record.entries : [];
+}
+async function pruneHistoryStore(store) {
+    const prefix = `history:${store}:`;
+    const keys = (await figma.clientStorage.keysAsync()).filter((k) => k.startsWith(prefix));
+    if (keys.length <= MAX_HISTORY_FILES)
+        return;
+    const withTimestamps = await Promise.all(keys.map(async (key) => {
+        var _a;
+        const record = (await figma.clientStorage.getAsync(key));
+        return { key, updatedAt: (_a = record === null || record === void 0 ? void 0 : record.updatedAt) !== null && _a !== void 0 ? _a : 0 };
+    }));
+    withTimestamps.sort((a, b) => a.updatedAt - b.updatedAt);
+    const toEvict = withTimestamps.slice(0, withTimestamps.length - MAX_HISTORY_FILES);
+    await Promise.all(toEvict.map((r) => figma.clientStorage.deleteAsync(r.key)));
+}
+async function saveHistoryEntries(store, fileKey, entries) {
+    const record = { updatedAt: Date.now(), entries };
+    await figma.clientStorage.setAsync(historyStorageKey(store, fileKey), record);
+    await pruneHistoryStore(store);
+}
 const command = figma.command;
 if (command === "clipboard") {
     // Must be visible so the paste event can fire (paste events don't reach hidden iframes)
@@ -175,7 +202,7 @@ else {
     figma.on("selectionchange", sendSelectionCount);
 }
 figma.ui.onmessage = async (msg) => {
-    var _a;
+    var _a, _b;
     if (msg.type === "ready") {
         if (command === "clipboard") {
             // UI is loaded — now it's safe to request clipboard data
@@ -183,11 +210,12 @@ figma.ui.onmessage = async (msg) => {
         }
         else if (command === "structured") {
             figma.ui.postMessage({ type: "structured-init" });
+            figma.ui.postMessage({ type: "file-key", fileKey: (_a = figma.fileKey) !== null && _a !== void 0 ? _a : null });
             sendCardSelectionCount();
         }
         else {
             // UI is loaded — safe to send the file key (for per-file history) and the initial selection count
-            figma.ui.postMessage({ type: "file-key", fileKey: (_a = figma.fileKey) !== null && _a !== void 0 ? _a : null });
+            figma.ui.postMessage({ type: "file-key", fileKey: (_b = figma.fileKey) !== null && _b !== void 0 ? _b : null });
             sendSelectionCount();
         }
     }
@@ -203,6 +231,13 @@ figma.ui.onmessage = async (msg) => {
     }
     else if (msg.type === "structured-apply") {
         await applyStructured(msg.headers, msg.records);
+    }
+    else if (msg.type === "history-load") {
+        const entries = await loadHistoryEntries(msg.store, msg.fileKey);
+        figma.ui.postMessage({ type: "history-data", store: msg.store, entries });
+    }
+    else if (msg.type === "history-save") {
+        await saveHistoryEntries(msg.store, msg.fileKey, msg.entries);
     }
     else if (msg.type === "clipboard-data") {
         if (msg.error) {
